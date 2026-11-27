@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS owners (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  time_zone TEXT,
+  retention_days INTEGER NOT NULL DEFAULT 30 CHECK (retention_days BETWEEN 7 AND 90)
+) STRICT;
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS login_attempts (
+  address TEXT PRIMARY KEY,
+  attempts INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+) STRICT;
