@@ -4,6 +4,7 @@ import { timeZones } from './validation.js';
 const iconPaths = {
   logo: '<path d="M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5M12 16V4m-5 5 5-5 5 5"/>',
   channels: '<path d="M3 8V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+  activity: '<path d="M2 12h5l3-8 4 16 3-8h5"/>',
   settings: '<path d="M4 7h3m4 0h9M4 17h9m4 0h3"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>',
   chevron: '<path d="m7 10 5 5 5-5"/>'
 };

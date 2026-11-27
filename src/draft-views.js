@@ -1,3 +1,5 @@
+import { platformCaption } from './publishing.js';
+import { platformSettings, publishReview } from './publish-views.js';
 import { eligiblePlatforms, formats, initialMetadata, maxFileSize, platforms, suggestedFormat, visibilities } from './draft-model.js';
 import { escape as e, icon, shell, textField } from './views.js';
 
@@ -30,9 +32,9 @@ function workspace(owner, title, body) {
   return shell({ title: e(title), path: '/channels', owner, body });
 }
 
-function folderShell(owner, folder, tab, content) {
+export function folderShell(owner, folder, tab, content) {
   const base = folderPath(folder.id);
-  const tabs = [['videos', 'Videos'], ['defaults', 'Defaults'], ['settings', 'Settings']];
+  const tabs = [['videos', 'Videos'], ['accounts','Accounts'], ['defaults', 'Defaults'], ['settings', 'Settings']];
   return workspace(owner, folder.name, `<a class="breadcrumb" href="/channels">← Channels</a>
     <div class="page-heading"><h1>${e(folder.name)}</h1>${folder.archived ? '<span class="badge">Archived</span>' : ''}</div>
     <nav class="subtabs" aria-label="Channel">${tabs.map(([route, label]) =>
@@ -65,14 +67,14 @@ export function channelsView(owner, folders, { query, archived, create = false, 
     ${filters}<div data-list-results>
     ${folders.length ? `<div class="folder-grid">${folders.map((folder) => `<a class="card folder-card" href="${folderVideos(folder)}">
       <span class="empty-icon">${icon('channels')}</span><h2>${e(folder.name)}</h2>
-      <p>${folder.drafts} ${folder.drafts === 1 ? 'draft' : 'drafts'}</p></a>`).join('')}</div>`
+      <p>${folder.drafts} ${folder.drafts === 1 ? 'draft' : 'drafts'} · ${folder.published} published</p></a>`).join('')}</div>`
     : `<div class="card empty-state"><span class="empty-icon">${icon('channels')}</span>${empty}</div>`}</div>`);
 }
 
 export function videosView(owner, folder, listing, filters, destinations, error) {
   const base = folderVideos(folder);
-  const { query, format, order } = filters;
-  const pageLink = (page) => `${base}?${e(new URLSearchParams({ q: query, format, order, page }).toString())}`;
+  const { query, format, order, status } = filters;
+  const pageLink = (page) => `${base}?${e(new URLSearchParams({ q: query, format, order, status, page }).toString())}`;
   return folderShell(owner, folder, 'videos', `<div class="page-heading"><h2>Videos</h2>
     ${folder.archived ? '' : `<a class="primary" href="${base}/new">Upload video</a>`}</div>
     ${notice(error)}
@@ -80,6 +82,7 @@ export function videosView(owner, folder, listing, filters, destinations, error)
       <form class="list-filters" action="${base}" data-list-filter data-video-list>
       ${optionalText('q', 'Search by title', query, 100)}
       ${select('format', 'Format', [['', 'All formats'], ...formats.map((item) => [item, item])], format)}
+      ${select('status','Status',[['','All statuses'], ...['Draft','Queued','Publishing','Published','Failed','Needs manual action','Check status'].map((item)=>[item,item])],status)}
       ${select('order', 'Sort by', [['updated', 'Last updated'], ['title', 'Title']], order)}
       <button class="plain-button">Apply filters</button></form></details>
     <div data-list-results>${listing.rows.length ? `<div class="video-list">${listing.rows.map((video) => {
@@ -87,7 +90,7 @@ export function videosView(owner, folder, listing, filters, destinations, error)
     return `<article class="card video-row">${video.thumbnail_format ? `<img src="${url}/thumbnail" alt="">`
       : `<span class="video-placeholder" aria-hidden="true">${icon('logo')}</span>`}
       <div class="video-summary"><h3><a href="${url}/details">${e(video.title)}</a></h3>
-      <div class="badges"><span class="badge ${video.format.toLowerCase()}">${video.format}</span><span class="badge">Draft</span>${badges(video.format)}</div>
+      <div class="badges"><span class="badge ${video.format.toLowerCase()}">${video.format}</span>${video.targets?.length ? video.targets.map((item) => `<span class="badge">${e(item.platform)} · ${e(item.state)}</span>`).join('') : '<span class="badge">Draft</span>' + badges(video.format)}</div>
       <p class="hint">Updated ${e(time(video.updated_at, owner.time_zone))}</p></div>
       ${folder.archived ? '' : `<details class="video-actions"><summary>Actions</summary><div>
         <a href="${url}/details">Edit draft</a>
@@ -98,7 +101,7 @@ export function videosView(owner, folder, listing, filters, destinations, error)
           <button class="plain-button" name="intent" value="move">Move draft</button></form>` : ''}
         <a class="danger-link" href="${url}/delete">Delete draft</a>
       </div></details>`}</article>`;
-  }).join('')}</div>` : `<div class="card empty-state">${query || format
+  }).join('')}</div>` : `<div class="card empty-state">${query || format || status
     ? `<p>No videos match your filters.</p><a href="${base}">Clear filters</a>`
     : `<p>This folder has no videos.</p>${folder.archived ? '' : `<a href="${base}/new">Upload a video</a>`}`}</div>`}
     ${listing.pages > 1 ? `<nav class="pagination" aria-label="Pages">${listing.page > 1 ? `<a href="${pageLink(listing.page - 1)}">Previous</a>` : ''}
@@ -207,8 +210,7 @@ function reviewView(video, url, archived) {
     ${metadata.hashtags.length ? `<p>${e(metadata.hashtags.join(' '))}</p>` : ''}
     ${metadata.tags.length ? `<p class="hint">YouTube tags · ${e(metadata.tags.join(', '))}</p>` : ''}
     <ul class="eligibility-list">${eligiblePlatforms(video.format).map((platform) => {
-      const caption = [platform === 'Instagram' || platform === 'TikTok' ? video.title : '',
-        metadata.description, metadata.hashtags.join(' '), metadata.captionFooters[platform]].filter(Boolean).join('\n\n');
+      const caption = platformCaption(video,platform);
       let visibility = metadata.visibility;
       if (visibility === 'Unlisted' && platform !== 'YouTube') {
         visibility = platform === 'Facebook' ? 'Page-visible' : 'Set when publishing';
@@ -222,12 +224,12 @@ function reviewView(video, url, archived) {
     ${archived ? '' : `<form method="post" action="${url}/review">${submit('Save draft')}</form>`}</div></section>`;
 }
 
-export function editorView(owner, folder, video, step, error) {
+export function editorView(owner, folder, video, step, error, context) {
   const url = videoPath(folder.id, video.id);
   let content;
   if (step === 'details') content = detailsView(video, url, folder.archived);
-  if (step === 'platforms') content = platformsView(video, url);
-  if (step === 'review') content = reviewView(video, url, folder.archived);
+  if (step === 'platforms') content = platformsView(video, url) + (context ? platformSettings(video, url, context, folder.archived) : '');
+  if (step === 'review') content = reviewView(video, url, folder.archived) + (context && !folder.archived ? publishReview(video, url, context) : '');
   return folderShell(owner, folder, 'videos', `<a class="breadcrumb" data-videos-back href="${folderVideos(folder)}">← Videos</a>
     <h2>${folder.archived ? 'View draft' : 'Edit draft'}</h2>
     <nav class="subtabs" aria-label="Draft steps" data-draft-steps>${stages.map(([route, title]) =>

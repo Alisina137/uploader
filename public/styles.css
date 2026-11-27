@@ -189,7 +189,7 @@ button { color: inherit; font: inherit; }
   .shell { display: block; }
   .sidebar { position: fixed; top: auto; inset: auto 0 0; z-index: 3; height: auto; padding: 4px 12px calc(4px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--line); }
   .sidebar-brand { display: none; }
-  .sidebar nav { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sidebar nav { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
   .sidebar nav a { flex-direction: column; justify-content: center; gap: 4px; padding: 4px; min-height: 52px; font-size: 12px; }
   .topbar { min-height: 64px; justify-content: space-between; padding: 8px 16px; }
   .mobile-brand { display: inline-flex; }
@@ -289,4 +289,17 @@ progress { width: 100%; height: 16px; accent-color: var(--accent); }
 
 @media (width > 1100px) {
   .draft-editor-grid { grid-template-columns: minmax(0, 640px) minmax(230px, 1fr); }
+}
+
+.activity-table { width: 100%; margin: 16px 0; border-collapse: collapse; background: var(--surface); font-size: 14px; }
+.activity-table caption { padding: 8px 0; text-align: left; }
+.activity-table th, .activity-table td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 12px; overflow-wrap: anywhere; }
+.activity-table th { color: var(--mute); }
+@media (width <= 760px) {
+  .activity-table, .activity-table tbody { display: block; background: transparent; }
+  .activity-table thead { position: absolute; clip-path: inset(50%); }
+  .activity-table tr { display: grid; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; padding: 12px; background: var(--surface); }
+  .activity-table td { display: grid; grid-template-columns: 76px minmax(0,1fr); padding: 4px; border: 0; }
+  .activity-table td::before { content: attr(data-label); color: var(--mute); }
+  .activity-table td > .badge { justify-self: start; }
 }

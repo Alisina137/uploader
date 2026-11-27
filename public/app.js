@@ -22,3 +22,12 @@ if (toast) {
     toast.remove();
   }, 4000);
 }
+
+if (document.querySelector('[data-account-refresh]')) {
+  let left = false;
+  window.addEventListener('blur', () => { left = true; });
+  window.addEventListener('focus', () => { if (left) location.replace(location.pathname); });
+}
+if (location.pathname === '/activity') {
+  setTimeout(() => { if (!document.hidden && document.activeElement === document.body) location.reload(); }, 30000);
+}

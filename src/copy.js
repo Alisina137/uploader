@@ -1,5 +1,5 @@
 export const brand = 'Upload Hub';
-export const navigation = { channels: 'Channels', settings: 'Settings' };
+export const navigation = { channels: 'Channels', activity: 'Activity', settings: 'Settings' };
 export const signIn = {
   title: 'Sign in',
   intro: 'Sign in with your owner account.',

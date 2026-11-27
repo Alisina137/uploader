@@ -31,3 +31,11 @@ No provider or paid service is required for P0. The publishing engine, TikTok mo
 The Videos list shows Draft as its sole status in P1. Platform eligibility appears in the editor while account connections, provider-specific controls, and publishing remain P2 scope. The locally stored source is shared when a draft is duplicated in the list and is removed after the last reference is deleted. Platform media delivery and hosted object storage require provider and deployment configuration in P2.
 
 Windows setup needs FFmpeg on PATH. Sources live on a private persistent filesystem for this single-instance phase. The database automatically upgrades existing P0 data on startup. Next phase is P2, Connect and Publish Now.
+
+## P2 Connect and Publish Now
+
+Ayrshare is the provider adapter. Each configured folder gets a separate encrypted partner profile. Existing folders provision on first connect. The Accounts tab refreshes linked identities from the partner. Review runs target validation, signs media links, and commits independent SQLite queue entries. The worker uses a stable idempotency key per submission, retries transient errors with backoff, and polls pending partner IDs. Activity records each target outcome. The default TikTok mode requires the creator to finish the post in TikTok Inbox.
+
+Live authorization, partner plan entitlements, external media access, and real platform publication require validation using the owner's configured accounts. No subscription or live post was created during development.
+
+Verification covered the P0 and P1 regression suite, signed media delivery, expired links and disconnect, foreign-folder denial, quota and caption/ratio rejection, replay protection, independent target failures, confirmed retry, and polling a pending result. Chromium exercised mobile Accounts and desktop Platforms → Review → Activity against an isolated test adapter. The interactive publishing setup command was exercised with disposable settings.

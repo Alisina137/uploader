@@ -39,7 +39,9 @@ export function draftStore(db) {
   return {
     listChannels(owner, query = '', archived = 0) {
       return db.prepare(`
-        SELECT channels.*, (SELECT count(*) FROM videos WHERE channel_id = channels.id) AS drafts
+        SELECT channels.*, (SELECT count(*) FROM videos v WHERE channel_id = channels.id AND NOT EXISTS
+          (SELECT 1 FROM publications p WHERE p.video_id=v.id)) AS drafts,
+          (SELECT count(DISTINCT p.video_id) FROM publications p WHERE p.channel_id=channels.id AND p.state='Published') AS published
         FROM channels WHERE owner_id = ? AND archived = ? AND instr(name_key, ?) > 0
         ORDER BY name_key, id
       `).all(owner, archived, keyOf(query)).map(decodeChannel);
@@ -76,9 +78,12 @@ export function draftStore(db) {
         return keys;
       });
     },
-    listVideos(id, { query, format, order, page }) {
-      const where = "videos.channel_id = ? AND instr(fold_title(videos.title), fold_title(?)) > 0 AND (? = '' OR videos.format = ?)";
-      const args = [id, query, format, format];
+    listVideos(id, { query, format, order, page, status = '' }) {
+      const search = "videos.channel_id = ? AND instr(fold_title(videos.title), fold_title(?)) > 0 AND (? = '' OR videos.format = ?)";
+      const where = search + ` AND (?='' OR (?='Draft' AND NOT EXISTS
+        (SELECT 1 FROM publications p WHERE p.video_id=videos.id)) OR EXISTS
+        (SELECT 1 FROM publications p WHERE p.video_id=videos.id AND p.state=?))`;
+      const args = [id, query, format, format, status, status, status];
       const count = db.prepare(`SELECT count(*) AS count FROM videos WHERE ${where}`).get(...args).count;
       const pages = Math.max(1, Math.ceil(count / pageSize));
       const current = Math.min(page, pages);

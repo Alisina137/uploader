@@ -10,6 +10,7 @@
     "setup": "node src/setup.js",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "setup:publishing": "node src/setup-publishing.js"
   }
 }

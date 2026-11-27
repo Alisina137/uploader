@@ -1,3 +1,5 @@
+import { publishService } from './publishing.js';
+import { publishingRoutes } from './publish-routes.js';
 import { mediaDirectory } from './config.js';
 import { mediaStorage } from './media.js';
 import { draftRoutes } from './draft-routes.js';
@@ -16,8 +18,9 @@ const files = new Map([
     { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL(`../public/${name}.js`, import.meta.url)) }]),
   ['/app.js', { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL('../public/app.js', import.meta.url)) }]
 ]);
-export function createApp({ store, origin, media = mediaStorage(mediaDirectory, store) }) {
-  const handleDraft = draftRoutes(store, media);
+export function createApp({ store, origin, media = mediaStorage(mediaDirectory, store), publishing = publishService(store) }) {
+  const publishRoutes = publishingRoutes(store,publishing);
+  const handleDraft = draftRoutes(store, media, publishing, publishRoutes);
   const secure = new URL(origin).protocol === 'https:';
 
   async function login(request, response, currentSession, form) {
@@ -59,12 +62,24 @@ export function createApp({ store, origin, media = mediaStorage(mediaDirectory, 
 
   async function handle(request, response) {
     response.setHeader('Cache-Control', 'no-store');
-    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self' https://profile.ayrshare.com; frame-ancestors 'none'");
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'same-origin');
 
     const url = new URL(request.url, origin);
     const path = url.pathname;
+    if (path.startsWith('/delivery/')) {
+      const delivery = /^\/delivery\/([a-f0-9-]{36})\/(video\.(?:mp4|mov)|cover\.(?:png|jpg))$/.exec(path);
+      const allowed = ['GET','HEAD'].includes(request.method) && delivery && publishing.keys?.valid(url);
+      const job = allowed && store.publishing.target(delivery[1]);
+      const video = job && store.getVideo(job.channel_id,job.video_id);
+      if (!video) return send(response,404,'Media unavailable');
+      if (delivery[2].startsWith('video')) return media.stream(video,request,response);
+      const image = store.getThumbnail(video.id);
+      if (!image) return send(response,404,'Thumbnail unavailable');
+      response.writeHead(200,{'Content-Type':image.mime,'Content-Length':image.data.length});
+      return response.end(request.method === 'HEAD' ? undefined : image.data);
+    }
     const asset = files.get(path);
     if (request.method === 'GET' && asset) {
       response.writeHead(200, { 'Content-Type': asset.type });
@@ -97,22 +112,23 @@ export function createApp({ store, origin, media = mediaStorage(mediaDirectory, 
       return path === '/login' ? login(request, response, currentSession, form) : saveSettings(response, owner, form);
     }
 
-    if (path === '/onboarding' || path === '/channels' || path.startsWith('/channels/')) {
+    if (path === '/activity' || path === '/activity/retry' || path === '/onboarding' || path === '/channels' || path.startsWith('/channels/')) {
       const wantsJson = request.headers.accept === 'application/json';
       if (!owner) return wantsJson ? json(response, 401, { error: 'Sign in to continue.' }) : redirect(response, '/login');
       if (request.method !== 'GET' && request.headers.origin !== origin) {
         return wantsJson ? json(response, 403, { error: 'Open Upload Hub at its configured address.' })
           : send(response, 403, messageView('Request denied', 'Open Upload Hub at its configured address and try again.', owner));
       }
+      if (path.startsWith('/activity')) return publishRoutes.activity(request,response,url,owner);
       return handleDraft(request, response, url, owner);
     }
 
     return send(response, 404, messageView('Page not found', 'This page is unavailable.', owner));
   }
 
-  return createServer({ requestTimeout: 120_000, headersTimeout: 15_000, maxHeaderSize: 16 * 1024 }, (request, response) => {
+  const server = createServer({ requestTimeout: 120_000, headersTimeout: 15_000, maxHeaderSize: 16 * 1024 }, (request, response) => {
     handle(request, response).catch((error) => {
-      if (request.destroyed || response.headersSent) {
+      if (response.destroyed || response.headersSent) {
         response.destroy();
         return;
       }
@@ -121,4 +137,11 @@ export function createApp({ store, origin, media = mediaStorage(mediaDirectory, 
       send(response, 500, messageView('Something went wrong', 'Please try again.'));
     });
   });
+  let timer;
+  server.once('listening', () => {
+    timer = setInterval(() => publishing.tick().catch(() => console.error('Publishing worker could not check its queue.')), 3000);
+    timer.unref();
+  });
+  server.once('close', () => clearInterval(timer));
+  return server;
 }

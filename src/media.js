@@ -92,6 +92,7 @@ export function mediaStorage(root, store) {
       }
       if (range) headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
       response.writeHead(range ? 206 : 200, { ...headers, 'Content-Length': end - start + 1 });
+      if (request.method === 'HEAD') return response.end();
       const stream = createReadStream(path, { start, end });
       response.on('close', () => stream.destroy());
       stream.on('error', () => response.destroy());

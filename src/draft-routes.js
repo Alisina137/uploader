@@ -1,4 +1,4 @@
-import { chunkSize, channelName, defaultsFrom, formats, InputError, maxFileSize,
+import { chunkSize, channelName, platforms, defaultsFrom, formats, InputError, maxFileSize,
   maxThumbnailSize, videoDetailsFrom } from './draft-model.js';
 import { channelsView, defaultsView, deleteVideoView, editorView, folderPath, folderSettingsView,
   onboardingView, uploadView, videoPath, videosView } from './draft-views.js';
@@ -8,7 +8,7 @@ import { messageView } from './views.js';
 
 const idPattern = '[a-f0-9-]{36}';
 const folderRoute = new RegExp(`^/channels/(${idPattern})(?:/(.*))?$`);
-const draftRoute = new RegExp(`^videos/(${idPattern})/(details|platforms|review|actions|delete|thumbnail|source)$`);
+const draftRoute = new RegExp(`^videos/(${idPattern})/(details|platforms|review|publish|actions|delete|thumbnail|source)$`);
 const transferRoute = new RegExp(`^videos/uploads(?:/(${idPattern})(/finish)?)?$`);
 
 async function formBody(request) {
@@ -19,7 +19,7 @@ async function formBody(request) {
 
 const apiRequest = (request) => request.headers.accept === 'application/json';
 
-export function draftRoutes(store, media) {
+export function draftRoutes(store, media, publishing, publishRoutes) {
   function requireEditable(owner, id) {
     const current = store.getChannel(owner.id, id);
     if (!current || current.archived) throw new InputError('Restore this folder before editing its drafts.', 409);
@@ -46,6 +46,7 @@ export function draftRoutes(store, media) {
     }
     try {
       const id = store.createChannel(owner.id, channelName(form.get('name')));
+      if (publishing.configured) await publishing.profile(store.getChannel(owner.id,id));
       return redirect(response, `${folderPath(id)}/videos`);
     } catch (error) {
       if (!(error instanceof InputError)) throw error;
@@ -57,12 +58,14 @@ export function draftRoutes(store, media) {
     const format = url.searchParams.get('format');
     const filters = {
       query: (url.searchParams.get('q') || '').trim().slice(0, 100),
+      status: url.searchParams.get('status') || '',
       format: formats.includes(format) ? format : '',
       order: url.searchParams.get('order') === 'title' ? 'title' : 'updated',
       page: Math.max(1, Number.parseInt(url.searchParams.get('page'), 10) || 1)
     };
     const destinations = store.listChannels(owner.id).filter((item) => item.id !== folder.id);
     const listing = store.listVideos(folder.id, filters);
+    for (const video of listing.rows) video.targets = store.publishing.targets(video.id);
     return send(response, error ? error.status : 200, videosView(owner, folder, listing, filters, destinations, error?.message));
   }
 
@@ -76,6 +79,8 @@ export function draftRoutes(store, media) {
     try {
       if (intent === 'delete') {
         if (form.get('confirmation') !== current.name) throw new InputError('Type the exact folder name to delete it.');
+        if (store.publishing.activeFolder(folder.id)) throw new InputError('Wait for the pending publication to finish.',409);
+        await publishing.remove(current);
         for (const key of store.deleteChannel(owner.id, folder.id)) media.removeUnused(key);
         return redirect(response, current.archived ? '/channels?archived=1' : '/channels');
       }
@@ -164,6 +169,7 @@ export function draftRoutes(store, media) {
       return response.end(image.data);
     }
     requireEditable(owner, video.channel_id);
+    if (store.publishing.targets(video.id).some((row) => ['Publishing','Queued'].includes(row.state))) throw new InputError('Wait for the pending publication before changing its thumbnail.',409);
     if (request.method === 'DELETE') {
       store.deleteThumbnail(video.id);
       return json(response, 200, {});
@@ -199,9 +205,9 @@ export function draftRoutes(store, media) {
         requireEditable(owner, folder.id);
         return send(response, 200, deleteVideoView(owner, folder, video));
       }
-      if (step !== 'actions') return send(response, 200, editorView(owner, folder, video, step));
+      if (['details','platforms','review'].includes(step)) return send(response, 200, editorView(owner, folder, video, step, null, publishRoutes.context(folder,video)));
     }
-    if (request.method !== 'POST' || !['details', 'review', 'actions'].includes(step)) {
+    if (request.method !== 'POST' || !['details', 'review', 'platforms', 'publish', 'actions'].includes(step)) {
       throw new InputError('This page is unavailable.', 404);
     }
     const form = await formBody(request);
@@ -210,6 +216,22 @@ export function draftRoutes(store, media) {
     if (!current) throw new InputError('This draft is unavailable.', 404);
     const base = videoPath(folder.id, id);
     try {
+      if (step === 'publish') {
+        if (Number(form.get('revision')) !== current.updated_at) throw new InputError('The draft changed. Review the current version before publishing.',409);
+        await publishing.queue(owner,folder,current,form.getAll('platform'),form);
+        return redirect(response,'/activity');
+      }
+      if (step === 'platforms') {
+        const delivery = Object.fromEntries(platforms.map((platform) => [platform, {
+          selected: form.has(platform), caption: (form.get(platform+'-caption') || '').trim().slice(0,10000)
+        }]));
+        Object.assign(delivery.YouTube,{ kids:form.get('kids'),category:form.get('category') });
+        if (delivery.YouTube.category && !/^[1-9]\d?$/.test(delivery.YouTube.category)) throw new InputError('Invalid YouTube category.');
+        delivery.Instagram.grid = form.has('grid');
+        for (const flag of ['branded','consent','comments','duet','stitch']) delivery.TikTok[flag] = form.has(flag);
+        store.saveVideo(folder.id,id,{...current,metadata:{...current.metadata,delivery}},false);
+        return redirect(response,base+'/review');
+      }
       if (step === 'details') {
         const values = videoDetailsFrom(form, current);
         store.saveVideo(folder.id, id, values, false);
@@ -224,6 +246,9 @@ export function draftRoutes(store, media) {
         return redirect(response, `${folderPath(folder.id)}/videos`);
       }
       const intent = form.get('intent');
+      if (['delete','move'].includes(intent) && store.publishing.targets(id).some((row) =>
+        ['Publishing','Queued','Check status'].includes(row.state))) throw new InputError('Wait for the pending publication to finish.',409);
+      if (intent === 'move' && store.publishing.targets(id).length) throw new InputError('Duplicate this published draft to move a copy.');
       if (intent === 'delete') {
         store.deleteVideo(current);
         media.removeUnused(current.media_key);
@@ -237,6 +262,8 @@ export function draftRoutes(store, media) {
       return redirect(response, `${folderPath(folder.id)}/videos`);
     } catch (error) {
       if (!(error instanceof InputError) || apiRequest(request)) throw error;
+      if (step === 'publish' || step === 'platforms') return send(response,error.status,editorView(owner,folder,current,
+        step === 'publish' ? 'review' : step,error.message,publishRoutes.context(folder,current)));
       if (step === 'actions') return showVideos(response, url, owner, folder, error);
       if (step === 'details') {
         const metadata = { ...current.metadata, description: form.get('description') || '',
@@ -259,6 +286,7 @@ export function draftRoutes(store, media) {
       const folder = match && store.getChannel(owner.id, match[1]);
       if (!folder) throw new InputError('This channel folder is unavailable.', 404);
       const part = match[2] || 'videos';
+      if (part === 'accounts') return await publishRoutes.accounts(request,response,folder,owner);
       if (part === 'settings') return await folderSettings(request, response, owner, folder);
       if (part === 'defaults') return await folderDefaults(request, response, owner, folder);
       if (part === 'videos' && request.method === 'GET') return showVideos(response, url, owner, folder);

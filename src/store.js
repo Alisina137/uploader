@@ -1,3 +1,4 @@
+import { publishStore } from './publish-store.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -7,7 +8,7 @@ export const sessionLifetime = 7 * 24 * 60 * 60;
 export const attemptWindow = 15 * 60 * 1000;
 const attemptLimit = 10;
 
-const migrations = ['001-foundation', '002-drafts'].map((name) =>
+const migrations = ['001-foundation', '002-drafts', '003-publishing'].map((name) =>
   readFileSync(new URL(`./migrations/${name}.sql`, import.meta.url), 'utf8')
 );
 
@@ -58,6 +59,7 @@ export function openStore(path) {
 
   return {
     ...draftStore(db),
+    publishing: publishStore(db),
     close: () => db.close(),
     getOwner: () => owner.get(),
     createOwner: ({ email, name, passwordHash }) => create.run(email, name, passwordHash).changes === 1,
