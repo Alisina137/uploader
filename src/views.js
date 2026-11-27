@@ -1,4 +1,4 @@
-import { brand, channels, navigation, settings, signIn } from './copy.js';
+import { brand, navigation, settings, signIn } from './copy.js';
 import { timeZones } from './validation.js';
 
 const iconPaths = {
@@ -8,12 +8,12 @@ const iconPaths = {
   chevron: '<path d="m7 10 5 5 5-5"/>'
 };
 
-function icon(name) {
+export function icon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
     stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${iconPaths[name]}</svg>`;
 }
 
-function escape(value = '') {
+export function escape(value = '') {
   const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   return String(value).replace(/[&<>"']/g, (character) => entities[character]);
 }
@@ -32,6 +32,7 @@ function document(title, content) {
     <title>${title} | ${brand}</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
+    <script src="/drafts.js" type="module"></script>
   </head>
   <body>${content}</body>
 </html>`;
@@ -41,7 +42,7 @@ function fieldError(name, error) {
   return error ? `<p class="field-error" id="${name}-error">${escape(error)}</p>` : '';
 }
 
-function textField({ name, label, value, error, hint, type = 'text', autocomplete, limit }) {
+export function textField({ name, label, value, error, hint, type = 'text', autocomplete, limit }) {
   const description = [hint && `${name}-hint`, error && `${name}-error`].filter(Boolean).join(' ');
   return `<div class="field">
     <label for="${name}">${label}</label>
@@ -70,7 +71,7 @@ export function loginView({ email = '', error = '' } = {}) {
   </main>`);
 }
 
-function shell({ title, path, owner, body }) {
+export function shell({ title, path, owner, body }) {
   const links = Object.entries(navigation).map(([key, label]) =>
     `<a href="/${key}" ${path === `/${key}` ? 'aria-current="page"' : ''}>${icon(key)}<span>${label}</span></a>`
   ).join('');
@@ -97,17 +98,6 @@ function shell({ title, path, owner, body }) {
         <main id="main" class="content" tabindex="-1">${body}</main>
       </div>
     </div>`);
-}
-
-export function channelsView(owner) {
-  return shell({
-    title: channels.title, path: '/channels', owner,
-    body: `<h1>${channels.title}</h1>
-      <div class="card empty-state">
-        <span class="empty-icon">${icon('channels')}</span>
-        <p>${channels.empty}</p>
-      </div>`
-  });
 }
 
 export function settingsView(owner, { values = owner, errors = {}, saved = false } = {}) {

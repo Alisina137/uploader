@@ -1,21 +1,24 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { draftStore } from './draft-store.js';
 
 export const sessionLifetime = 7 * 24 * 60 * 60;
 export const attemptWindow = 15 * 60 * 1000;
 const attemptLimit = 10;
 
-const foundation = readFileSync(new URL('./migrations/001-foundation.sql', import.meta.url), 'utf8');
+const migrations = ['001-foundation', '002-drafts'].map((name) =>
+  readFileSync(new URL(`./migrations/${name}.sql`, import.meta.url), 'utf8')
+);
 
 function migrate(db) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const { user_version: version } = db.prepare('PRAGMA user_version').get();
-    if (version > 1) throw new Error('The database requires a newer version of Upload Hub.');
-    if (version === 0) {
-      db.exec(foundation);
-      db.exec('PRAGMA user_version = 1');
+    if (version > migrations.length) throw new Error('The database requires a newer version of Upload Hub.');
+    for (let index = version; index < migrations.length; index++) {
+      db.exec(migrations[index]);
+      db.exec(`PRAGMA user_version = ${index + 1}`);
     }
     db.exec('COMMIT');
   } catch (error) {
@@ -38,7 +41,7 @@ export function openStore(path) {
   const firstTimeZone = db.prepare('UPDATE owners SET time_zone = ? WHERE id = 1 AND time_zone IS NULL');
   const save = db.prepare('UPDATE owners SET name = ?, email = ?, time_zone = ? WHERE id = ?');
   const findSession = db.prepare(`
-    SELECT owners.id, name, email, time_zone FROM sessions
+    SELECT owners.id, name, email, time_zone, onboarded FROM sessions
     JOIN owners ON owners.id = sessions.owner_id
     WHERE token_hash = ? AND expires_at > ?
   `);
@@ -54,6 +57,7 @@ export function openStore(path) {
   const clearAttempts = db.prepare('DELETE FROM login_attempts WHERE address = ?');
 
   return {
+    ...draftStore(db),
     close: () => db.close(),
     getOwner: () => owner.get(),
     createOwner: ({ email, name, passwordHash }) => create.run(email, name, passwordHash).changes === 1,

@@ -1,41 +1,23 @@
+import { mediaDirectory } from './config.js';
+import { mediaStorage } from './media.js';
+import { draftRoutes } from './draft-routes.js';
+import { json, readForm, redirect, send } from './http.js';
+import { InputError } from './draft-model.js';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { createToken, readSessionToken, sessionCookie, tokenHash, verifyPassword } from './auth.js';
 import { settings, signIn } from './copy.js';
-import { channelsView, loginView, messageView, settingsView } from './views.js';
+import { loginView, messageView, settingsView } from './views.js';
 import { normalizeTimeZone, validateProfile } from './validation.js';
 
 const files = new Map([
   ['/styles.css', { type: 'text/css; charset=utf-8', body: readFileSync(new URL('../public/styles.css', import.meta.url)) }],
+  ...['drafts', 'uploads'].map((name) => [`/${name}.js`,
+    { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL(`../public/${name}.js`, import.meta.url)) }]),
   ['/app.js', { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL('../public/app.js', import.meta.url)) }]
 ]);
-const formLimit = 8 * 1024;
-
-function send(response, status, body) {
-  response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
-  response.end(body);
-}
-
-function redirect(response, location) {
-  response.writeHead(303, { Location: location });
-  response.end();
-}
-
-async function readForm(request) {
-  const type = request.headers['content-type']?.split(';')[0].trim().toLowerCase();
-  if (type !== 'application/x-www-form-urlencoded') return null;
-  if (Number(request.headers['content-length']) > formLimit) return null;
-  const chunks = [];
-  let length = 0;
-  for await (const chunk of request.iterator({ destroyOnReturn: false })) {
-    length += chunk.length;
-    if (length > formLimit) return null;
-    chunks.push(chunk);
-  }
-  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
-}
-
-export function createApp({ store, origin }) {
+export function createApp({ store, origin, media = mediaStorage(mediaDirectory, store) }) {
+  const handleDraft = draftRoutes(store, media);
   const secure = new URL(origin).protocol === 'https:';
 
   async function login(request, response, currentSession, form) {
@@ -60,7 +42,7 @@ export function createApp({ store, origin }) {
     store.clearAttempts(address);
     store.setInitialTimeZone(normalizeTimeZone(form.get('timeZone')) || 'UTC');
     response.setHeader('Set-Cookie', sessionCookie(token, secure));
-    return redirect(response, '/channels');
+    return redirect(response, owner.onboarded ? '/channels' : '/onboarding');
   }
 
   function saveSettings(response, owner, form) {
@@ -77,11 +59,12 @@ export function createApp({ store, origin }) {
 
   async function handle(request, response) {
     response.setHeader('Cache-Control', 'no-store');
-    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'same-origin');
 
-    const path = new URL(request.url, origin).pathname;
+    const url = new URL(request.url, origin);
+    const path = url.pathname;
     const asset = files.get(path);
     if (request.method === 'GET' && asset) {
       response.writeHead(200, { 'Content-Type': asset.type });
@@ -95,7 +78,6 @@ export function createApp({ store, origin }) {
     if (request.method === 'GET') {
       if (path === '/') return redirect(response, owner ? '/channels' : '/login');
       if (path === '/login') return owner ? redirect(response, '/channels') : send(response, 200, loginView());
-      if (path === '/channels') return owner ? send(response, 200, channelsView(owner)) : redirect(response, '/login');
       if (path === '/settings') return owner ? send(response, 200, settingsView(owner)) : redirect(response, '/login');
     }
 
@@ -115,15 +97,26 @@ export function createApp({ store, origin }) {
       return path === '/login' ? login(request, response, currentSession, form) : saveSettings(response, owner, form);
     }
 
+    if (path === '/onboarding' || path === '/channels' || path.startsWith('/channels/')) {
+      const wantsJson = request.headers.accept === 'application/json';
+      if (!owner) return wantsJson ? json(response, 401, { error: 'Sign in to continue.' }) : redirect(response, '/login');
+      if (request.method !== 'GET' && request.headers.origin !== origin) {
+        return wantsJson ? json(response, 403, { error: 'Open Upload Hub at its configured address.' })
+          : send(response, 403, messageView('Request denied', 'Open Upload Hub at its configured address and try again.', owner));
+      }
+      return handleDraft(request, response, url, owner);
+    }
+
     return send(response, 404, messageView('Page not found', 'This page is unavailable.', owner));
   }
 
-  return createServer({ requestTimeout: 30_000, headersTimeout: 15_000, maxHeaderSize: 16 * 1024 }, (request, response) => {
+  return createServer({ requestTimeout: 120_000, headersTimeout: 15_000, maxHeaderSize: 16 * 1024 }, (request, response) => {
     handle(request, response).catch((error) => {
       if (request.destroyed || response.headersSent) {
         response.destroy();
         return;
       }
+      if (error instanceof InputError) return send(response, error.status, messageView('Invalid request', error.message));
       console.error(error);
       send(response, 500, messageView('Something went wrong', 'Please try again.'));
     });

@@ -6,10 +6,6 @@ export const signIn = {
   invalid: 'The email or password is incorrect.',
   throttled: 'Too many sign-in attempts. Wait 15 minutes and try again.'
 };
-export const channels = {
-  title: navigation.channels,
-  empty: 'No channel folders yet.'
-};
 export const settings = {
   title: navigation.settings,
   intro: 'Manage your account and how dates and times appear in Upload Hub.',

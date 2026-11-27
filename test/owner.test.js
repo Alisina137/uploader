@@ -56,10 +56,12 @@ test('owner can sign in, save settings to disk, and sign out', async (context) =
 
   const login = await request('/login', post({ email: 'OWNER@example.com', password, timeZone: 'Asia/Kabul' }));
   assert.equal(login.status, 303);
-  assert.equal(login.headers.get('location'), '/channels');
+  assert.equal(login.headers.get('location'), '/onboarding');
   const session = login.headers.get('set-cookie');
   assert.match(session, /HttpOnly; SameSite=Lax/);
   const headers = { Cookie: session.split(';')[0] };
+  assert.match(await (await request('/onboarding', { headers })).text(), /Create your first channel folder/);
+  assert.equal((await request('/onboarding', post({ intent: 'skip' }, headers))).headers.get('location'), '/channels');
   assert.match(await (await request('/channels', { headers })).text(), /No channel folders yet/);
   assert.match(await (await request('/settings', { headers })).text(), /value="Asia\/Kabul" selected/);
   assert.equal((await request('/calendar', { headers })).status, 404);

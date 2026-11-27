@@ -1,5 +1,6 @@
+import { mediaStorage } from './media.js';
 import { createApp } from './app.js';
-import { databasePath, host, origin, port } from './config.js';
+import { databasePath, host, mediaDirectory, origin, port } from './config.js';
 import { openStore } from './store.js';
 
 const store = openStore(databasePath);
@@ -8,7 +9,9 @@ if (!store.getOwner()) {
   store.close();
   process.exitCode = 1;
 } else {
-  const server = createApp({ store, origin });
+  const media = mediaStorage(mediaDirectory, store);
+  media.clean();
+  const server = createApp({ store, origin, media });
   server.listen(port, host, () => console.log(`Upload Hub is running at ${origin}`));
   for (const signal of ['SIGTERM', 'SIGINT']) {
     process.once(signal, () => server.close(() => store.close()));
